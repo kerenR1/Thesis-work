@@ -1,99 +1,168 @@
 import numpy as np
-from sklearn.mixture import GaussianMixture
 import matplotlib.pyplot as plt
+from sklearn.mixture import GaussianMixture
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+from scipy.spatial.transform import Rotation as R
 
 
-# Function to calculate the Hellinger distance between two PDFs.
-def hellinger_distance(pdf1, pdf2):
-    """
-        Calculate the Hellinger distance between two PDFs.
+# ------------------------------------------3D GMMs before change in distance--------------------------------------
 
-        Parameters:
-        - pdf1: PDF values from the first GMM.
-        - pdf2: PDF values from the second GMM.
-
-        Returns:
-        - Hellinger distance.
-        """
-    pdf1 /= np.sum(pdf1)  # Normalize pdf1
-    pdf2 /= np.sum(pdf2)  # Normalize pdf2
-    return np.sqrt(1 - np.sum(np.sqrt(pdf1 * pdf2)))
+# Function to generate 3D data from a Gaussian distribution
+def generate_data(mean, cov, size):
+    return np.random.multivariate_normal(mean, cov, size)
 
 
-# Generate synthetic data for two GMMs
-data1 = np.random.normal(loc=0, scale=1, size=(100, 3))  # Data for GMM 1
-data2 = np.random.normal(loc=2, scale=1.5, size=(100, 3))  # Data for GMM 2
+# Generate synthetic data for GMM 1 and GMM 2 (3D data)
+np.random.seed(42)  # Random seed
+data1 = np.vstack([  # Combine three Gaussian clusters into a single dataset
+    generate_data([2, 2, 2], [[1, 0.5, 0.1], [0.5, 1, 0.2], [0.1, 0.2, 1]], 100),
+    generate_data([5, 5, 5], [[1, -0.3, 0], [-0.3, 1, 0.1], [0, 0.1, 1]], 100),
+    generate_data([8, 2, 2], [[1, 0, 0], [0, 1, 0.1], [0, 0.1, 1]], 100)
+])
 
-# Fit GMMs with three components to the data.
-gmm1 = GaussianMixture(n_components=3)
+data2 = np.vstack([
+    generate_data([1, 1, 1], [[1, 0.2, 0.1], [0.2, 1, 0.3], [0.1, 0.3, 1]], 100),
+    generate_data([6, 6, 6], [[1, 0.4, 0], [0.4, 1, 0.2], [0, 0.2, 1]], 100),
+    generate_data([9, 1, 1], [[1, 0.1, 0], [0.1, 1, 0.1], [0, 0.1, 1]], 100)
+])
+
+# Fit GMMS to the data (3D data)
+gmm1 = GaussianMixture(n_components=3, covariance_type='full')
 gmm1.fit(data1)
 
-print("GMM 1:")
-print("Weights:", gmm1.weights_)
-print("Means:", gmm1.means_)
-print("Covariances:", gmm1.covariances_)
-
-
-gmm2 = GaussianMixture(n_components=3)
+gmm2 = GaussianMixture(n_components=3, covariance_type='full')
 gmm2.fit(data2)
 
+# Print GMM attributes
+print("GMM 1:")
+print("Means:\n", gmm1.means_)
+print("Covariances:\n", gmm1.covariances_)
+print("Weights:\n", gmm1.weights_)
 print("\nGMM 2:")
-print("Weights:", gmm2.weights_)
-print("Means:", gmm2.means_)
-print("Covariances:", gmm2.covariances_)
+print("Means:\n", gmm2.means_)
+print("Covariances:\n", gmm2.covariances_)
+print("Weights:\n", gmm2.weights_)
 
 
-# Evaluate PDFs of the GMMs on a 3D grid
-X = np.linspace(-5, 7, 50)  # Define a range for each dimension
-grid = np.array(np.meshgrid(X, X, X)).T.reshape(-1, 3)  # Create a 3D grid of points
-PDF1 = np.exp(gmm1.score_samples(grid)) + 1e-10  # Add epsilon to stabilize calculations for PDF1
-PDF2 = np.exp(gmm2.score_samples(grid)) + 1e-10  # Add epsilon to stabilize calculations for PDF2
+# Function to calculate the Hellinger distance between two GMMs
+def hellinger_distance_gmm(gmm_1, gmm_2):
+    distance = 0
+    for i in range(gmm_1.n_components):
+        for j in range(gmm_2.n_components):
+            # Extract the mean and covariance of the components
+            mean1, cov1 = gmm_1.means_[i], gmm_1.covariances_[i]
+            mean2, cov2 = gmm_2.means_[j], gmm_2.covariances_[j]
 
-# Calculate the Hellinger distance.
-distance = hellinger_distance(PDF1, PDF2)
-print("\nHellinger Distance between GMM 1 and GMM 2:", distance)
+            # Compute the average covariance matrix
+            cov_avg = (cov1 + cov2) / 2
 
+            # Calculate the coefficient using determinants
+            coeff = (np.linalg.det(cov1) ** 0.25 * np.linalg.det(cov2) ** 0.25) / (np.linalg.det(cov_avg) ** 0.5)
 
-# Function to plot 3D ellipsoid for each GMM component
-def plot_ellipsoid(mean, cov, ax, color, alpha=0.3):
-    """Plot a 3D ellipsoid representing a GMM component"""
-    u, s, vh = np.linalg.svd(cov)
-    radii = np.sqrt(s)
-    # Generate sphere points
-    phi = np.linspace(0, 2 * np.pi, 100)
-    theta = np.linspace(0, np.pi, 50)
-    x = radii[0] * np.outer(np.cos(phi), np.sin(theta))
-    y = radii[1] * np.outer(np.sin(phi), np.sin(theta))
-    z = radii[2] * np.outer(np.ones_like(phi), np.cos(theta))
+            # Calculate the exponential term based on the difference in means
+            mean_diff = mean1 - mean2
+            exp_term = -0.125 * mean_diff @ np.linalg.inv(cov_avg) @ mean_diff.T
 
-    for i in range(len(x)):
-        for j in range(len(x[i])):
-            xyz = np.dot(u, np.array([x[i][j], y[i][j], z[i][j]])) + mean
-            x[i][j], y[i][j], z[i][j] = xyz
+            # Add contribution to the total distance
+            distance += np.sqrt(coeff * np.exp(exp_term))
 
-    ax.plot_surface(x, y, z, color=color, alpha=alpha)
+    # Final Hellinger distance calculation
+    return np.sqrt(1 - distance / (gmm_1.n_components * gmm_2.n_components))
 
 
-# Plot GMMs and ellipsoids
-fig = plt.figure(figsize=(10, 10))
-axis = fig.add_subplot(111, projection='3d')
+# Calculate and print the Hellinger distance
+hellinger_dist = hellinger_distance_gmm(gmm1, gmm2)
+print("\nHellinger Distance between GMM 1 and GMM 2:", hellinger_dist)
 
-# Plot data and ellipsoids for GMM 1
-axis.scatter(data1[:, 0], data1[:, 1], data1[:, 2], c='blue', label='GMM 1 Data', alpha=0.5)
-for means, covariance in zip(gmm1.means_, gmm1.covariances_):
-    plot_ellipsoid(means, covariance, axis, color='blue')
 
-# Plot data and ellipsoids for GMM 2
-axis.scatter(data2[:, 0], data2[:, 1], data2[:, 2], c='red', label='GMM 2 Data', alpha=0.5)
-for means, covariance in zip(gmm2.means_, gmm2.covariances_):
-    plot_ellipsoid(means, covariance, axis, color='red')
+# Function to plot GMM components in 3D
+def plot_gmm_3d_with_ellipsoids(gmm, axis, gmm_label, color):
+    """
+    Plots the Gaussian components in 3D space with confidence ellipsoids.
+    Parameters:
+        gmm (GaussianMixture): The GMM to plot.
+        axis (Axes3D): The matplotlib 3D Axes object to draw on.
+        gmm_label (str): Label prefix for the GMM components.
+        color (str): Color for the ellipses and markers.
+    """
+    for i in range(gmm.n_components):
+        # Extract the mean and covariance of the i-th component
+        mean = gmm.means_[i]
+        cov = gmm.covariances_[i]
 
-# Annotate with Hellinger distance.
-axis.text2D(0.05, 0.95, f"Hellinger Distance: {distance:.4f}", transform=axis.transAxes)
+        # Plot the mean as a marker with a specific label
+        axis.scatter(mean[0], mean[1], mean[2], c=color, s=150, label=f"{gmm_label} - Component {i + 1}", marker='x')
 
-axis.set_title("GMM 3D Plot with Ellipsoids")
-axis.set_xlabel("X")
-axis.set_ylabel("Y")
-axis.set_zlabel("Z")
-axis.legend(loc='upper right')
+        # Generate confidence ellipsoid
+        plot_ellipsoid_3D(mean, cov, axis, color=color, alpha=0.1)
+
+
+def plot_ellipsoid_3D(mean, cov, axis, color, alpha=0.1):
+    """
+    Draws a 3D confidence ellipsoid for a Gaussian distribution.
+    Parameters:
+        mean (ndarray): Mean of the Gaussian distribution (3D vector).
+        cov (ndarray): Covariance matrix (3x3).
+        axis (Axes3D): The matplotlib 3D Axes object to draw on.
+        color (str): Color for the ellipsoid.
+        alpha (float): Transparency of the ellipsoid.
+    """
+    # Eigen decomposition of the covariance matrix
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+
+    # Scale eigenvectors by sqrt of eigenvalues to get principal axes lengths
+    radii = 2 * np.sqrt(eigenvalues)  # 2 standard deviations
+
+    # Create a grid of points for a unit sphere
+    u = np.linspace(0, 2 * np.pi, 30)
+    v = np.linspace(0, np.pi, 30)
+    x = np.outer(np.cos(u), np.sin(v))
+    y = np.outer(np.sin(u), np.sin(v))
+    z = np.outer(np.ones_like(u), np.cos(v))
+
+    # Combine sphere points into a single array
+    sphere = np.stack([x, y, z], axis=-1)
+
+    # Transform the sphere by the eigenvectors and scale by radii
+    rotation = R.from_matrix(eigenvectors).as_matrix()
+    ellipsoid = sphere @ (rotation.T * radii)
+
+    # Translate to the mean
+    ellipsoid += mean
+
+    # Create a 3D polygon collection for the ellipsoid
+    poly = Poly3DCollection([list(zip(ellipsoid[:, :, 0].flatten(),
+                                      ellipsoid[:, :, 1].flatten(),
+                                      ellipsoid[:, :, 2].flatten()))],
+                            alpha=alpha, color=color)
+    axis.add_collection3d(poly)
+
+
+# Create the plot figure (3D)
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+# Plot the data points
+ax.scatter(data1[:, 0], data1[:, 1], data1[:, 2], c='blue', s=10, alpha=0.5, label='Data Points (GMM 1)')
+ax.scatter(data2[:, 0], data2[:, 1], data2[:, 2], c='green', s=10, alpha=0.5, label='Data Points (GMM 2)')
+
+# Plot each GMM with labeled components and ellipsoids
+plot_gmm_3d_with_ellipsoids(gmm1, ax, gmm_label='GMM 1', color='red')
+plot_gmm_3d_with_ellipsoids(gmm2, ax, gmm_label='GMM 2', color='orange')
+
+# Configure the plot
+ax.set_title("3D Gaussian Mixture Models with Confidence Ellipsoids", fontsize=16)
+ax.set_xlabel("Feature 1")
+ax.set_ylabel("Feature 2")
+ax.set_zlabel("Feature 3")
+ax.legend(loc='upper left', fontsize=10)
+
+# Add the Hellinger distance as text on the graph
+hellinger_text = f"Hellinger Distance: {hellinger_dist:.4f}"
+ax.text2D(0.95, 0.05, hellinger_text, transform=ax.transAxes, fontsize=12,
+          verticalalignment='bottom', horizontalalignment='right',
+          bbox=dict(boxstyle="round,pad=0.3", edgecolor='black', facecolor='white'))
+
+# Display the plot
 plt.show()
