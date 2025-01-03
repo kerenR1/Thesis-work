@@ -15,6 +15,9 @@ def fit_gmm(data, n_components=3, covariance_type='full'):
     # Fit a GMM to the data with specified number of components and covariance type
     gmm = GaussianMixture(n_components=n_components, covariance_type=covariance_type)
     gmm.fit(data)
+    print("Means:\n", gmm.means_)  # Centers of the Gaussian components
+    print("Covariances:\n", gmm.covariances_)  # Covariance matrices of the components
+    print("Weights:\n", gmm.weights_)  # Mixing weights of the components
     return gmm
 
 
@@ -33,6 +36,7 @@ def hellinger_distance_gmm(gmm_1, gmm_2):
     distance = 0
     for i in range(gmm_1.n_components):
         for j in range(gmm_2.n_components):
+            # Extract the mean and covariance of the components
             mean1 = gmm_1.means_[i]
             mean2 = gmm_2.means_[j]
 
@@ -44,9 +48,12 @@ def hellinger_distance_gmm(gmm_1, gmm_2):
 
             # Compute average covariance and coefficients for the Hellinger formula
             cov_avg = (cov1 + cov2) / 2
+            # Calculate the coefficient using determinants
             coeff = (np.linalg.det(cov1) ** 0.25 * np.linalg.det(cov2) ** 0.25) / (np.linalg.det(cov_avg) ** 0.5)
+            # Calculate the exponential term based on the difference in means
             mean_diff = mean1 - mean2
             exp_term = -0.125 * mean_diff @ np.linalg.inv(cov_avg) @ mean_diff.T
+            # Add contribution to the total distance
             distance += np.sqrt(coeff * np.exp(exp_term))
 
     # Normalize the distance by the number of components in each GMM
@@ -55,6 +62,13 @@ def hellinger_distance_gmm(gmm_1, gmm_2):
 
 # Function to plot GMM components and their ellipses
 def plot_gmm(gmm, axis, label, color):
+    """
+        Parameters:
+            gmm (GaussianMixture): The GMM to plot.
+            axis (Axes): The matplotlib Axes object to draw on.
+            label (str): Label for the GMM components.
+            color (str): Color for the ellipses and markers.
+    """
     def get_full_covariance(cov, covariance_type):
         """Convert covariance to full matrix if needed."""
         if covariance_type == 'diag':
@@ -64,21 +78,28 @@ def plot_gmm(gmm, axis, label, color):
         return cov
 
     for i in range(gmm.n_components):
+        # Extract the mean and covariance of the i-th component
         mean = gmm.means_[i]
         if gmm.covariance_type == 'tied':
             cov = gmm.covariances_
         else:
             cov = get_full_covariance(gmm.covariances_[i], gmm.covariance_type)
 
-        # Compute eigenvalues and eigenvectors for the covariance matrix
+        # Compute the eigenvalues and eigenvectors of the covariance matrix, Spread determined by the eigenvalues
+        # of the covariance matrix
         eigenvalues, eigenvectors = np.linalg.eigh(cov)
+        # Compute the angle of rotation using the arctangent of the eigenvectors' components
         angle = np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0]) * 180 / np.pi
+        # Width and height of the ellipse based on eigenvalues
         width, height = 2 * np.sqrt(eigenvalues)
+        # Create and add the ellipse to the plot
         ellipse = Ellipse(xy=mean, width=width, height=height, angle=angle,
                           edgecolor=color, facecolor='none', lw=2)
-        axis.add_patch(ellipse)
+        # Center (xy): the mean of the component
+        axis.add_patch(ellipse)  # Plot the center of the Gaussian component (mean) as an 'x' marker
     # Plot GMM component means
     axis.scatter(gmm.means_[:, 0], gmm.means_[:, 1], c=color, s=100, label=label, marker='x')
+    # gmm.means_[:, 0], gmm.means_[:, 1] = x (row) and y (col) coordinates of the center, s= size of the marker
 
 
 # Function to execute and visualize a GMM scenario
@@ -88,7 +109,9 @@ def gmm_scenario(data1_params, data2_params, title, covariance_type='full'):
     data2 = np.vstack([generate_data(*params) for params in data2_params])
 
     # Fit GMMs to the generated data
+    print("GMM 1:")
     gmm1 = fit_gmm(data1, covariance_type=covariance_type)
+    print("\nGMM 2:")
     gmm2 = fit_gmm(data2, covariance_type=covariance_type)
 
     # Compute Hellinger distance between the two GMMs
@@ -98,6 +121,11 @@ def gmm_scenario(data1_params, data2_params, title, covariance_type='full'):
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.scatter(data1[:, 0], data1[:, 1], c='blue', s=10, alpha=0.5, label='Data GMM 1')
     ax.scatter(data2[:, 0], data2[:, 1], c='green', s=10, alpha=0.5, label='Data GMM 2')
+    # data[:, 0]: selects the first column, corresponding to the first feature (x-axis).
+    # data[:, 1]: selects the second column, corresponding to the second feature (y-axis).
+    # s=10: defines the size of the points in the scatter plot (a small size of 10 is used for visual clarity)
+    # alpha=0.5: sets the transparency level of the points. A value of 0.5 ensures the points are semi-transparent,
+    # helping avoid clutter when points overlap
     plot_gmm(gmm1, ax, label='GMM 1 Components', color='red')
     plot_gmm(gmm2, ax, label='GMM 2 Components', color='orange')
 
@@ -106,6 +134,7 @@ def gmm_scenario(data1_params, data2_params, title, covariance_type='full'):
     ax.set_xlabel("Feature 1")
     ax.set_ylabel("Feature 2")
     ax.legend()
+    # Add the Hellinger distance as text on the graph
     hellinger_text = f"Hellinger Distance: {hellinger_dist:.4f}"
     ax.text(0.05, 0.95, hellinger_text, transform=ax.transAxes, fontsize=12,
             verticalalignment='bottom', bbox=dict(boxstyle="round,pad=0.3", edgecolor='black', facecolor='white'))
@@ -114,6 +143,7 @@ def gmm_scenario(data1_params, data2_params, title, covariance_type='full'):
 
 
 # Define parameters for scenarios
+# Combine three Gaussian clusters into a single dataset, each param has 2 data sets
 original_params = [
     ([[2, 2], [[1, 0.5], [0.5, 1]], 100],
      [[5, 5], [[1, -0.3], [-0.3, 1]], 100],
